@@ -20,12 +20,6 @@ module load cuda/11.8
 nvidia-smi -l 300 >> gpu_usage-jobid-${SLURM_JOB_ID}.log &
 MONITOR_PID=$!
 
-seff ${SLURM_JOB_ID} -l 300 >> cpu_usage-jobid-${SLURM_JOB_ID}.log &
-MONITOR_PID=$!
-
-nvcc -o vectorAdd vectorAdd.cu
-nsys profile --trace=cuda,osrt ./vectorAdd
-
-source /projects/emco4286/environments/fitting/bin/activate
+source /projects/emco4286/environments/fitting310/bin/activate
 echo "Running .py script"
-python /home/emco4286/gads-analysis/batch_scripts/python_scripts/fit_texas_CT.py
+CUDA_VISIBLE_DEVICES=0 python /home/emco4286/gads-analysis/batch_scripts/python_scripts/fit_texas_CT.py

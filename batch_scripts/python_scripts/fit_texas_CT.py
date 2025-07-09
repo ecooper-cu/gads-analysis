@@ -29,13 +29,69 @@ from model import FeatureDependentMarkovChain
 
 torch.backends.cudnn.benchmark = True
 
-pt1 = os.path.join("/projects", 'emco4286', 'data', "gads", "trajectories", "ct", "preloaded")
+pt1 = os.path.join("/projects", "emco4286", 'data', "gads", "trajectories", "ct", "long")
 
-states = np.load(os.path.join(pt1, "states.npy"))
-features = np.load(os.path.join(pt1, "features.npy"))
-lengths = np.load(os.path.join(pt1, "lengths.npy"))
+def glob_re(pattern, strings):
+    return list(filter(re.compile(pattern).match, strings))
 
-print("Loaded sequences \n")
+filenames = glob_re(r"gen_\d+_class_CT_rating_\d+_state_Texas.csv", os.listdir(pt1))
+
+def consecutive_groups(iterable, ordering=lambda x: x):
+    for k, g in groupby(enumerate(iterable), key=lambda x: x[0] - ordering(x[1])):
+        yield map(itemgetter(1), g)
+
+states_new = []
+features_new = []
+lengths_new = []
+
+columns = ['y3', 'ERCOT', 'y4', 'Pcp', 'Tmax', 'Tmin', 'y6', 'y8', 'y7', 'y9']
+
+print("Creating sequences")
+for f in filenames:
+
+    id = re.findall(r"gen_(\d+)", f)[0]
+
+    data = pd.read_csv(os.path.join(pt1,f))
+    data.set_index(pd.DatetimeIndex(data["x"]), inplace=True)
+    data = data[~data.index.duplicated()]
+    original_length = len(data)
+
+    for c in columns:
+        data = data[~data[c].isna()]
+
+    # print(f"{id}: {len(data)}, {100*np.round(len(data)/original_length, 2)}\%")
+
+    if len(data) < 2:
+        continue
+
+    start = data.index[0]
+    diffs = np.diff((data.index))
+    hours = np.cumsum(diffs/np.timedelta64(1, 'h')).astype(int) - 1
+
+    sequences = []
+    for g in consecutive_groups(hours):
+        sequences.append(list(g))
+
+    for k in sequences:
+
+        dts = pd.DatetimeIndex(start + np.array([datetime.timedelta(hours=int(h)) for h in k]))
+        index = data.loc[dts[0]:dts[-1], :].index
+        states = data.loc[index, "y2"].values.tolist()
+        features = data.loc[index, columns].values
+        l = len(k)
+
+        states_new += [states]
+        features_new += [features]
+
+        
+        lengths_new += [l]
+
+states = np.concatenate(states_new).astype(int)
+states -= 1
+features = np.vstack(features_new)
+lengths = np.array(lengths_new)
+
+print("Created sequences")
 
 train_idx =  int(lengths.size * .7)
 val_idx =  int(lengths.size * .8)
@@ -59,7 +115,7 @@ features_val = ss.transform(features_val)
 features_test = ss.transform(features_test)
 
 n = 4
-model1 = FeatureDependentMarkovChain(n, lam_frob=0.1, n_iter=1, batch_size=100)
+model1 = FeatureDependentMarkovChain(n, lam_frob=0.1, n_iter=1, batch_size=1000, mini_batch_size=200)
 model1.fit(states_train, features_train, lengths_train, verbose=False)
 
 print("Model #1")
